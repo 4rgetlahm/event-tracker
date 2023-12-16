@@ -1,13 +1,8 @@
 package entity
 
-import (
-	"time"
-
-	"github.com/google/uuid"
-)
+import "gorm.io/gorm"
 
 type User struct {
-	uuid       uuid.UUID `json:"uuid"`
-	email      string    `json:"email"`
-	createDate time.Time `json:"createDate"`
+	gorm.Model
+	Email string
 }
