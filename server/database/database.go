@@ -1,13 +1,25 @@
 package database
 
 import (
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var DB *gorm.DB
+var DB *mongo.Database
+var EventCollection *mongo.Collection
 
-func GetDatabase() *gorm.DB {
+func GetEventCollection() *mongo.Collection {
+	if EventCollection == nil {
+		EventCollection = GetDatabase().Collection("events")
+	}
+	return EventCollection
+}
+
+func GetDatabase() *mongo.Database {
 	if DB == nil {
 		err := Connect()
 		if err != nil {
@@ -18,8 +30,12 @@ func GetDatabase() *gorm.DB {
 }
 
 func Connect() error {
-	dsn := "host=localhost user=? password=? dbname=? port=? TimeZone=Europe/Vilnius"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	DB = db
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:27017/"))
+	if err != nil {
+		fmt.Println("Error connecting to MongoDB")
+	}
+	DB = client.Database("event-tracker")
 	return err
 }

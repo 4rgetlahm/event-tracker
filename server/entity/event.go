@@ -3,8 +3,7 @@ package entity
 import (
 	"time"
 
-	"github.com/google/uuid"
-	"gorm.io/gorm"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type EventStatus string
@@ -15,16 +14,14 @@ const (
 )
 
 type Event struct {
-	gorm.Model
-	ID              uuid.UUID `gorm:"type:uuid;default:gen_random_uuid()"`
+	ID              primitive.ObjectID `bson:"_id"`
 	Title           string
 	Description     string
 	Slots           int
-	RegisteredUsers []User `gorm:"many2many:event_registrations;"`
-	Creator         string `gorm:"not null"`
-	Status          string `gorm:"default:'open'"`
+	RegisteredUsers []string
+	Creator         string
+	Status          string
 	EventDate       time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
 }
