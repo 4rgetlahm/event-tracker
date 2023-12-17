@@ -1,12 +1,16 @@
 package service
 
 import (
+	"context"
 	"errors"
-	"fmt"
+	"time"
 
 	"github.com/4rgetlahm/event-tracker/server/database"
 	"github.com/4rgetlahm/event-tracker/server/entity"
-	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"gorm.io/gorm"
 )
 
@@ -14,42 +18,97 @@ type EventCreateRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Slots       int    `json:"slots"`
+	EventDate   string `json:"eventDate"`
+}
+
+func GetEvent(objectId primitive.ObjectID) (entity.Event, error) {
+	var event entity.Event
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := database.GetEventCollection().FindOne(ctx, bson.M{"_id": objectId}).Decode(&event)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return event, errors.New("Event not found")
+		}
+		return event, err
+	}
+
+	return event, err
+}
+
+func GetEvents(from int, to int) ([]entity.Event, error) {
+	var events []entity.Event
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cursor, err := database.GetEventCollection().Find(ctx, bson.M{}, options.Find().SetSkip(int64(from)).SetLimit(int64(to-from)))
+
+	if err != nil {
+		return events, err
+	}
+
+	if err = cursor.All(ctx, &events); err != nil {
+		return events, err
+	}
+
+	return events, nil
 }
 
 func CreateEvent(req *EventCreateRequest) (entity.Event, error) {
-	var db = database.GetDatabase()
+
+	eventDate, err := time.Parse("2006-01-02", req.EventDate)
+
+	if err != nil {
+		return entity.Event{}, errors.New("Invalid event date format")
+	}
+
 	var event = entity.Event{
+		ID:              primitive.NewObjectID(),
 		Title:           req.Title,
 		Description:     req.Description,
 		Slots:           req.Slots,
-		RegisteredUsers: []entity.User{},
+		Status:          string(entity.Open),
+		RegisteredUsers: []string{},
+		Creator:         "test",
+		EventDate:       eventDate,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
-	err := db.Create(&event).Error
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = database.GetEventCollection().InsertOne(ctx, event)
+
 	return event, err
 }
 
-func UpdateEvent(UUID uuid.UUID, req *EventCreateRequest) (entity.Event, error) {
-	var db = database.GetDatabase()
-	var event entity.Event
-	err := db.Find(&event, "id = ?", UUID).Error
+func UpdateEvent(objectId primitive.ObjectID, req *EventCreateRequest) (entity.Event, error) {
+	event, err := GetEvent(objectId)
+
 	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return event, errors.New("Event not found")
+		}
 		return event, err
 	}
+
 	event.Title = req.Title
 	event.Description = req.Description
 	event.Slots = req.Slots
-	err = db.Save(&event).Error
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": objectId}
+	_, err = database.GetEventCollection().UpdateOne(ctx, filter, event)
+
 	return event, err
 }
 
-func AddUserToEvent(UUID uuid.UUID, email string) (entity.Event, error) {
-	var db = database.GetDatabase()
-
-	var event entity.Event
-	err := db.Model(entity.Event{}).Preload("RegisteredUsers").First(&event, "id = ?", UUID).Error
+func AddUserToEvent(objectId primitive.ObjectID, email string) (entity.Event, error) {
+	event, err := GetEvent(objectId)
 
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, mongo.ErrNoDocuments) {
 			return event, errors.New("Event not found")
 		}
 		return event, err
@@ -63,24 +122,24 @@ func AddUserToEvent(UUID uuid.UUID, email string) (entity.Event, error) {
 		return event, errors.New("Event is not open")
 	}
 
-	fmt.Print(event)
-
 	if emailInUsers(email, event.RegisteredUsers) {
 		return event, errors.New("User is already registered to this event")
 	}
 
-	fmt.Print(event)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	db.Model(&event).Association("RegisteredUsers").Append(&entity.User{Email: email})
+	addQuery := bson.M{"$push": bson.M{"registeredusers": email}}
+	filter := bson.M{"_id": objectId}
+
+	_, err = database.GetEventCollection().UpdateOne(ctx, filter, addQuery)
 
 	return event, err
 }
 
-func RemoveUserFromEvent(UUID uuid.UUID, email string) (entity.Event, error) {
-	var db = database.GetDatabase()
+func RemoveUserFromEvent(objectId primitive.ObjectID, email string) (entity.Event, error) {
 
-	var event entity.Event
-	err := db.Model(entity.Event{}).Preload("RegisteredUsers").First(&event, "id = ?", UUID).Error
+	event, err := GetEvent(objectId)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -93,44 +152,24 @@ func RemoveUserFromEvent(UUID uuid.UUID, email string) (entity.Event, error) {
 		return event, errors.New("Event is not open")
 	}
 
-	user, err := getUserByEmail(email, event.RegisteredUsers)
-	if err != nil {
+	if !emailInUsers(email, event.RegisteredUsers) {
 		return event, errors.New("User is not registered to this event")
 	}
 
-	db.Model(&event).Association("RegisteredUsers").Delete(&user)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	removeQuery := bson.M{"$pull": bson.M{"registeredusers": email}}
+	filter := bson.M{"_id": objectId}
+
+	_, err = database.GetEventCollection().UpdateOne(ctx, filter, removeQuery)
 
 	return event, err
 }
 
-func GetEvent(UUID uuid.UUID) (entity.Event, error) {
-	var db = database.GetDatabase()
-	var event entity.Event
-	err := db.Model(entity.Event{}).Preload("RegisteredUsers").Find(&event, "id = ?", UUID).Error
-	return event, err
-}
-
-func GetEvents(from int, to int) ([]entity.Event, error) {
-	var db = database.GetDatabase()
-	var events []entity.Event
-	err := db.Limit(to - from).Offset(from).Find(&events).Error
-	return events, err
-}
-
-func getUserByEmail(email string, users []entity.User) (entity.User, error) {
-	for _, user := range users {
-		if user.Email == email {
-			return user, nil
-		}
-	}
-	return entity.User{}, errors.New("User not found")
-}
-
-func emailInUsers(email string, users []entity.User) bool {
-	fmt.Println(email)
-	for _, user := range users {
-		fmt.Println(user.Email)
-		if user.Email == email {
+func emailInUsers(email string, userEmails []string) bool {
+	for _, userEmail := range userEmails {
+		if userEmail == email {
 			return true
 		}
 	}

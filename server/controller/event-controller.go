@@ -6,7 +6,7 @@ import (
 
 	"github.com/4rgetlahm/event-tracker/server/service"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func BindEventRoutes(router *gin.Engine) {
@@ -24,17 +24,17 @@ func BindEventRoutes(router *gin.Engine) {
 		c.JSON(http.StatusCreated, event)
 	})
 
-	router.GET("/v1/event/:uuid", func(c *gin.Context) {
-		uuidParam := c.Param("uuid")
-		parsedUUID, err := uuid.Parse(uuidParam)
+	router.GET("/v1/event/:id", func(c *gin.Context) {
+		uuidParam := c.Param("id")
+		objectId, err := primitive.ObjectIDFromHex(uuidParam)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid UUID",
+				"error": "Invalid event ID",
 			})
 			return
 		}
 
-		event, err := service.GetEvent(parsedUUID)
+		event, err := service.GetEvent(objectId)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -81,19 +81,19 @@ func BindEventRoutes(router *gin.Engine) {
 		})
 	})
 
-	router.POST("/v1/event/:uuid/register", func(c *gin.Context) {
-		uuidParam := c.Param("uuid")
+	router.POST("/v1/event/:id/register", func(c *gin.Context) {
+		uuidParam := c.Param("id")
 		userEmail := "testemail@gmail.com"
 
-		parsedUUID, err := uuid.Parse(uuidParam)
+		objectId, err := primitive.ObjectIDFromHex(uuidParam)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid UUID",
+				"error": "Invalid event ID",
 			})
 			return
 		}
 
-		event, err := service.AddUserToEvent(parsedUUID, userEmail)
+		_, err = service.AddUserToEvent(objectId, userEmail)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -101,25 +101,23 @@ func BindEventRoutes(router *gin.Engine) {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"event": event,
-		})
+		c.Status(http.StatusOK)
 
 	})
 
-	router.POST("/v1/event/:uuid/cancel", func(c *gin.Context) {
-		uuidParam := c.Param("uuid")
+	router.POST("/v1/event/:id/cancel", func(c *gin.Context) {
+		uuidParam := c.Param("id")
 		userEmail := "testemail@gmail.com"
 
-		parsedUUID, err := uuid.Parse(uuidParam)
+		objectId, err := primitive.ObjectIDFromHex(uuidParam)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "Invalid UUID",
+				"error": "Invalid event ID",
 			})
 			return
 		}
 
-		event, err := service.RemoveUserFromEvent(parsedUUID, userEmail)
+		_, err = service.RemoveUserFromEvent(objectId, userEmail)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -127,8 +125,6 @@ func BindEventRoutes(router *gin.Engine) {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{
-			"event": event,
-		})
+		c.Status(http.StatusOK)
 	})
 }
