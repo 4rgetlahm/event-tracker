@@ -1,19 +1,31 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/4rgetlahm/event-tracker/server/middleware"
 	"github.com/4rgetlahm/event-tracker/server/service"
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"google.golang.org/api/oauth2/v2"
 )
 
 func BindEventRoutes(router *gin.Engine) {
-	router.POST("/v1/event", func(c *gin.Context) {
+	router.POST("/v1/event", middleware.RequireAdministrator(), func(c *gin.Context) {
 		var createRequest service.EventCreateRequest
 		c.BindJSON(&createRequest)
-		event, err := service.CreateEvent(&createRequest)
+
+		email, err := getEmail(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		event, err := service.CreateEvent(email, &createRequest)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -24,7 +36,7 @@ func BindEventRoutes(router *gin.Engine) {
 		c.JSON(http.StatusCreated, event)
 	})
 
-	router.GET("/v1/event/:id", func(c *gin.Context) {
+	router.GET("/v1/event/:id", middleware.RequireAdministrator(), func(c *gin.Context) {
 		uuidParam := c.Param("id")
 		objectId, err := primitive.ObjectIDFromHex(uuidParam)
 		if err != nil {
@@ -68,7 +80,32 @@ func BindEventRoutes(router *gin.Engine) {
 			return
 		}
 
-		events, err := service.GetEvents(from, to)
+		email, err := getEmail(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		if !isAdministrator(c) {
+			events, err := service.GetEventsForUser(email, from, to)
+
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": err.Error(),
+				})
+
+				return
+			}
+
+			c.JSON(http.StatusOK, gin.H{
+				"events": events,
+			})
+			return
+		}
+
+		events, err := service.GetDetailedEvents(email, from, to)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -83,7 +120,13 @@ func BindEventRoutes(router *gin.Engine) {
 
 	router.POST("/v1/event/:id/register", func(c *gin.Context) {
 		uuidParam := c.Param("id")
-		userEmail := "testemail@gmail.com"
+		userEmail, err := getEmail(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
 
 		objectId, err := primitive.ObjectIDFromHex(uuidParam)
 		if err != nil {
@@ -105,9 +148,15 @@ func BindEventRoutes(router *gin.Engine) {
 
 	})
 
-	router.POST("/v1/event/:id/cancel", func(c *gin.Context) {
+	router.POST("/v1/event/:id/cancel-registration", func(c *gin.Context) {
 		uuidParam := c.Param("id")
-		userEmail := "testemail@gmail.com"
+		userEmail, err := getEmail(c)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
 
 		objectId, err := primitive.ObjectIDFromHex(uuidParam)
 		if err != nil {
@@ -127,4 +176,22 @@ func BindEventRoutes(router *gin.Engine) {
 
 		c.Status(http.StatusOK)
 	})
+}
+
+func isAdministrator(c *gin.Context) bool {
+	isAdministrator, exists := c.Get("isAdministrator")
+	if !exists || !isAdministrator.(bool) {
+		return false
+	}
+	return true
+}
+
+func getEmail(c *gin.Context) (string, error) {
+	tokenInfo, exists := c.Get("tokenInfo")
+	if !exists {
+		return "", errors.New("Token info not found")
+	}
+
+	tokenInfoCast := tokenInfo.(*oauth2.Tokeninfo)
+	return tokenInfoCast.Email, nil
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/4rgetlahm/event-tracker/server/database"
@@ -30,35 +31,125 @@ func GetEvent(objectId primitive.ObjectID) (entity.Event, error) {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return event, errors.New("Event not found")
 		}
-		return event, err
+
+		log.Println(err)
+		return event, errors.New("Error retrieving event")
 	}
 
 	return event, err
 }
 
-func GetEvents(from int, to int) ([]entity.Event, error) {
+func GetEventsForUser(email string, from int, to int) ([]entity.EventWithUserState, error) {
+	if from < 0 {
+		return []entity.EventWithUserState{}, errors.New("Invalid from field")
+	}
+
+	if to < 0 {
+		return []entity.EventWithUserState{}, errors.New("Invalid to field")
+	}
+
+	if from > to {
+		return []entity.EventWithUserState{}, errors.New("From cannot be greater than to")
+	}
+
+	if to-from > 100 {
+		return []entity.EventWithUserState{}, errors.New("Cannot retrieve more than 100 events")
+	}
+
 	var events []entity.Event
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cursor, err := database.GetEventCollection().Find(ctx, bson.M{}, options.Find().SetSkip(int64(from)).SetLimit(int64(to-from)))
+	cursor, err := database.GetEventCollection().Find(ctx, bson.M{}, options.Find().
+		SetSort(bson.D{{Key: "eventdate", Value: -1}}).
+		SetSkip(int64(from)).
+		SetLimit(int64(to-from)))
 
 	if err != nil {
-		return events, err
+		log.Println(err)
+		return []entity.EventWithUserState{}, errors.New("Error retrieving events")
 	}
 
 	if err = cursor.All(ctx, &events); err != nil {
-		return events, err
+		log.Println(err)
+		return []entity.EventWithUserState{}, errors.New("Error retrieving events")
 	}
 
-	return events, nil
+	var detailedEvents []entity.EventWithUserState
+
+	for _, event := range events {
+		isRegistered := emailInUsers(email, event.RegisteredUsers)
+		slotsLeft := event.Slots - len(event.RegisteredUsers)
+		event.RegisteredUsers = nil
+		event.Creator = "hidden"
+		detailedEvents = append(detailedEvents, entity.EventWithUserState{
+			Event:        event,
+			IsRegistered: isRegistered,
+			SlotsLeft:    slotsLeft,
+		})
+	}
+
+	return detailedEvents, nil
+
 }
 
-func CreateEvent(req *EventCreateRequest) (entity.Event, error) {
+func GetDetailedEvents(email string, from int, to int) ([]entity.EventWithUserState, error) {
+	if from < 0 {
+		return []entity.EventWithUserState{}, errors.New("Invalid from field")
+	}
+
+	if to < 0 {
+		return []entity.EventWithUserState{}, errors.New("Invalid to field")
+	}
+
+	if from > to {
+		return []entity.EventWithUserState{}, errors.New("From cannot be greater than to")
+	}
+
+	if to-from > 100 {
+		return []entity.EventWithUserState{}, errors.New("Cannot retrieve more than 100 events")
+	}
+
+	var events []entity.Event
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cursor, err := database.GetEventCollection().Find(ctx, bson.M{}, options.Find().
+		SetSort(bson.D{{Key: "eventdate", Value: -1}}).
+		SetSkip(int64(from)).
+		SetLimit(int64(to-from)))
+
+	if err != nil {
+		log.Println(err)
+		return []entity.EventWithUserState{}, errors.New("Error retrieving events")
+	}
+
+	if err = cursor.All(ctx, &events); err != nil {
+		log.Println(err)
+		return []entity.EventWithUserState{}, errors.New("Error retrieving events")
+	}
+
+	var detailedEvents []entity.EventWithUserState
+
+	for _, event := range events {
+		detailedEvents = append(detailedEvents, entity.EventWithUserState{
+			Event:        event,
+			IsRegistered: emailInUsers(email, event.RegisteredUsers),
+			SlotsLeft:    event.Slots - len(event.RegisteredUsers),
+		})
+	}
+
+	return detailedEvents, nil
+}
+
+func CreateEvent(creatorEmail string, req *EventCreateRequest) (entity.Event, error) {
 
 	eventDate, err := time.Parse("2006-01-02", req.EventDate)
 
 	if err != nil {
 		return entity.Event{}, errors.New("Invalid event date format")
+	}
+
+	if eventDate.Before(time.Now()) {
+		return entity.Event{}, errors.New("Event date cannot be in the past")
 	}
 
 	var event = entity.Event{
@@ -68,7 +159,7 @@ func CreateEvent(req *EventCreateRequest) (entity.Event, error) {
 		Slots:           req.Slots,
 		Status:          string(entity.Open),
 		RegisteredUsers: []string{},
-		Creator:         "test",
+		Creator:         creatorEmail,
 		EventDate:       eventDate,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
@@ -77,6 +168,11 @@ func CreateEvent(req *EventCreateRequest) (entity.Event, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err = database.GetEventCollection().InsertOne(ctx, event)
+
+	if err != nil {
+		log.Println(err)
+		return entity.Event{}, errors.New("Error creating event")
+	}
 
 	return event, err
 }
@@ -101,6 +197,11 @@ func UpdateEvent(objectId primitive.ObjectID, req *EventCreateRequest) (entity.E
 	filter := bson.M{"_id": objectId}
 	_, err = database.GetEventCollection().UpdateOne(ctx, filter, event)
 
+	if err != nil {
+		log.Println(err)
+		return event, errors.New("Error updating event")
+	}
+
 	return event, err
 }
 
@@ -122,6 +223,10 @@ func AddUserToEvent(objectId primitive.ObjectID, email string) (entity.Event, er
 		return event, errors.New("Event is not open")
 	}
 
+	if event.EventDate.Before(time.Now()) {
+		return event, errors.New("Event has already passed")
+	}
+
 	if emailInUsers(email, event.RegisteredUsers) {
 		return event, errors.New("User is already registered to this event")
 	}
@@ -133,6 +238,11 @@ func AddUserToEvent(objectId primitive.ObjectID, email string) (entity.Event, er
 	filter := bson.M{"_id": objectId}
 
 	_, err = database.GetEventCollection().UpdateOne(ctx, filter, addQuery)
+
+	if err != nil {
+		log.Println(err)
+		return event, errors.New("Error adding user to event")
+	}
 
 	return event, err
 }
@@ -163,6 +273,11 @@ func RemoveUserFromEvent(objectId primitive.ObjectID, email string) (entity.Even
 	filter := bson.M{"_id": objectId}
 
 	_, err = database.GetEventCollection().UpdateOne(ctx, filter, removeQuery)
+
+	if err != nil {
+		log.Println(err)
+		return event, errors.New("Error removing user from event")
+	}
 
 	return event, err
 }
