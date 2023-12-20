@@ -1,18 +1,22 @@
-import { ChakraProvider } from "@chakra-ui/react";
-import { createContext } from "react";
-import useAuth from "../hooks/useAuth";
+import { ChakraProvider } from '@chakra-ui/react'
+import { createContext } from 'react'
+import useAuth, { AuthenticationContextParams } from '../hooks/useAuth'
 
-export const Authentication = createContext({
-    authCode: null as string | null,
+export const Authentication = createContext<AuthenticationContextParams>({
+    accessToken: null,
+    tokenStore: null,
     login: () => {},
     logout: () => {},
-    setAuthCode: (code: string) => {},
-});
+    setAccessToken: () => {},
+})
 
-export default function DependencyInjector({ children } : { children: JSX.Element}) {
+export default function DependencyInjector({
+    children,
+}: {
+    children: JSX.Element
+}) {
+    const auth = useAuth()
 
-    const auth = useAuth();
-    
     return (
         <ChakraProvider>
             <Authentication.Provider value={auth}>

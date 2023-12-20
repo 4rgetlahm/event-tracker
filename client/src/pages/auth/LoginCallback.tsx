@@ -1,20 +1,34 @@
-import { useContext, useEffect } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { Authentication } from "../../components/DependencyInjector";
+import { useContext, useEffect } from 'react'
+import {
+    Navigate,
+    useLocation,
+    useNavigate,
+    useSearchParams,
+} from 'react-router-dom'
+import { Authentication } from '../../components/DependencyInjector'
 
-
-export function LoginCallback(){
-    const auth = useContext(Authentication);
-    const navigate = useNavigate();
-    const [urlParams] = useSearchParams();
+export function LoginCallback() {
+    const auth = useContext(Authentication)
+    const navigate = useNavigate()
+    const { hash } = useLocation()
 
     useEffect(() => {
-        if(urlParams.has("code")){
-            auth.setAuthCode(urlParams.get("code")!);
-            navigate("/");
+        console.log(hash)
+
+        const params = new Map()
+
+        hash.slice(1)
+            .split('&')
+            .forEach((param) => {
+                const [key, value] = param.split('=')
+                params.set(key, value)
+            })
+
+        if (params.get('access_token') != null) {
+            auth.setAccessToken(params.get('access_token')!)
+            navigate('/')
         }
-    }, [urlParams, auth]);
+    }, [hash, auth])
 
-
-    return (<></>);
+    return <></>
 }
