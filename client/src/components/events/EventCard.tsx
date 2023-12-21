@@ -134,6 +134,8 @@ export function EventCard({
                             {isRegistered && !eventInPast && (
                                 <Button
                                     variant="outline"
+                                    whiteSpace={'wrap'}
+                                    height={'auto'}
                                     colorScheme={'red'}
                                     onClick={() => {
                                         cancelRegistration()
@@ -143,7 +145,12 @@ export function EventCard({
                                 </Button>
                             )}
                             {eventInPast && (
-                                <Button variant="outline" disabled>
+                                <Button
+                                    variant="outline"
+                                    whiteSpace={'wrap'}
+                                    height={'auto'}
+                                    disabled
+                                >
                                     Įvykęs renginys
                                 </Button>
                             )}

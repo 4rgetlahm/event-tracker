@@ -59,7 +59,7 @@ export default function Landing() {
 
     return (
         <>
-            <Container maxW="container.lg" sx={{ mt: 20 }}>
+            <Container maxWidth="container.lg" sx={{ mt: 20 }}>
                 {fetching && (
                     <Center sx={{ mt: 16, mb: 20 }}>
                         <Spinner size={'xl'} />
@@ -92,7 +92,7 @@ export default function Landing() {
                         />
                     </Box>
                 ))}
-                <Center>
+                <Center sx={{ mb: 8 }}>
                     {page > 0 && (
                         <Button
                             onClick={() => setPage(page - 1)}
